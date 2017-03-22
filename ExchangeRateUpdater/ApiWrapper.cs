@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Net.Http;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
 
 namespace ExchangeRateUpdater
@@ -16,23 +17,9 @@ namespace ExchangeRateUpdater
             _client = new HttpClient();
         }
 
-        public Dictionary<string, decimal> GetRequest(string baseCurrency, string targetCurrencies)
+        public Task<HttpResponseMessage> GetRequest(string baseCurrency, string targetCurrencies)
         {
-            var response = _client.GetAsync(string.Format(Url, baseCurrency, targetCurrencies)).Result;
-            if (!response.IsSuccessStatusCode)
-            {
-                if (response.StatusCode.ToString() == "422")
-                {
-                    return new Dictionary<string, decimal>();
-                }
-                throw new Exception($"API Error {(int) response.StatusCode}");
-            }
-
-            var json = response.Content.ReadAsStringAsync().Result;
-
-            var result = JsonConvert.DeserializeObject<ApiResponce>(json);
-
-            return result.Rates;
+            return _client.GetAsync(string.Format(Url, baseCurrency, targetCurrencies));
         }
 
         public void Dispose()

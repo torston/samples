@@ -1,41 +1,58 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
+using Newtonsoft.Json;
 
 namespace ExchangeRateUpdater
 {
     public class ExchangeRateProvider
     {
-        /// <summary>
-        /// Should return exchange rates among the specified currencies that are defined by the source. But only those defined
-        /// by the source, do not return calculated exchange rates. E.g. if the source contains "EUR/USD" but not "USD/EUR",
-        /// do not return exchange rate "USD/EUR" with value calculated as 1 / "EUR/USD". If the source does not provide
-        /// some of the currencies, ignore them.
-        /// </summary>
+        private const string InvalidCurrencyCode = "422";
+        private readonly ApiWrapper _apiWrapper = new ApiWrapper();
+
         public IEnumerable<ExchangeRate> GetExchangeRates(IEnumerable<Currency> currencies)
         {
             if (currencies == null)
             {
                 throw new ArgumentException("Currencies cannot be null");
             }
-            var currenciesList = currencies.ToList();
+            var currenciesList = new HashSet<Currency>(currencies);
 
-            var targetCurrencies = string.Join(",", currenciesList.Select(c => c.Code));
             if (currenciesList.Count == 0)
             {
                 return Enumerable.Empty<ExchangeRate>();
             }
             var exchangeRates = new List<ExchangeRate>();
-            var api = new ApiWrapper();
 
-            foreach (var cur in currenciesList)
+            var targetCurrencies = string.Join(",", currenciesList.Select(c => c.Code));
+            var tasks = currenciesList.Select(cur => _apiWrapper.GetRequest(cur.Code, targetCurrencies)).ToArray();
+
+            Task.WaitAll(tasks);
+
+            foreach (var t in tasks)
             {
-                var stringses = api.GetRequest(cur.Code, targetCurrencies);
+                var response = t.Result;
 
-                exchangeRates.AddRange(stringses.Select(k => new ExchangeRate(cur, new Currency(k.Key), k.Value)));
+                if (!response.IsSuccessStatusCode)
+                {
+                    if (response.StatusCode.ToString() == InvalidCurrencyCode)
+                    {
+                        continue;
+                    }
+                    throw new Exception($"API Error {(int)response.StatusCode}");
+                }
+
+                var json = response.Content.ReadAsStringAsync().Result;
+
+                var result = JsonConvert.DeserializeObject<ApiResponce>(json);
+                exchangeRates
+                    .AddRange(result.Rates.Select(k => new ExchangeRate(new Currency(result.Currency), new Currency(k.Key), k.Value)));
             }
-            return exchangeRates;
 
+            _apiWrapper.Dispose();
+
+            return exchangeRates;
         }
     }
 }
